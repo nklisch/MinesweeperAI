@@ -13,7 +13,7 @@ def isBomb(value):
 
 def countAdjacentBombs(x, y, bombBoard):
     bombs = 0
-    for xMod in (range(-1, 2)):
+    for xMod in range(-1, 2):
         for yMod in range(-1, 2):
             currentX, currentY = (x + xMod), (y + yMod)
             if 0 <= currentX < bombBoard.shape[0] and 0 <= currentY < bombBoard.shape[1]:
