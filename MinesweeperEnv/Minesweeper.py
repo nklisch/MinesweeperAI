@@ -59,10 +59,11 @@ def decodeAction(action, boardShape):
 class MinesweeperEnv(gym.Env):
 
     def __init__(self, shape, ratioOfBombs=0.20):
-        self.action_space = spaces.Discrete(shape[0] * shape[1])
+        self.size = shape[0] * shape[1]
+        self.action_space = spaces.Discrete(self.size)
+        self.shape = shape
         self.ratioOfBombs = ratioOfBombs
         self.observation_space = spaces.Box(low=0.0, high=1.0, shape=(CHANNELS, shape[0], shape[1]))
-        self.shape = shape
         self.board, self.bombBoard, self.bombCountBoard, self.numOfBombs, self.seed, self.firstMove = None
         self.reset()
 
@@ -79,10 +80,13 @@ class MinesweeperEnv(gym.Env):
                         elif not isBomb(self.bombBoard[currentX][currentY]):
                             self.board[adjacentBombs][currentX][currentY] = 1
 
+    def won(self):
+        return self.size - self.board[0].sum() == self.numOfBombs
+
     def areWeDone(self, x, y):
         if isBomb(self.bombBoard[x][y]):
             return True, -1
-        elif self.board[self.board == 1].sum() <= self.numOfBombs:
+        elif self.won():
             return True, 1
         return False, 0
 
