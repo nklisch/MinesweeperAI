@@ -13,12 +13,13 @@ def isBomb(value):
 
 def countAdjacentBombs(x, y, bombBoard):
     bombs = 0
-    for xMod in range(-1, 2):
+    for xMod in (range(-1, 2)):
         for yMod in range(-1, 2):
             currentX, currentY = (x + xMod), (y + yMod)
             if 0 <= currentX < bombBoard.shape[0] and 0 <= currentY < bombBoard.shape[1]:
-                if isBomb(bombBoard[currentX][currentY]):
-                    bombs += 1
+                if not (currentX == x and currentY == y):
+                    if isBomb(bombBoard[currentX][currentY]):
+                        bombs += 1
     return bombs
 
 
@@ -78,7 +79,7 @@ class MinesweeperEnv(gym.Env):
                         elif not isBomb(self.bombBoard[currentX][currentY]):
                             self.board[adjacentBombs][currentX][currentY] = 1
 
-    def didWeWin(self, x, y):
+    def areWeDone(self, x, y):
         if isBomb(self.bombBoard[x][y]):
             return True, -1
         elif self.board[self.board == 1].sum() <= self.numOfBombs:
@@ -96,10 +97,9 @@ class MinesweeperEnv(gym.Env):
         self.board[0][x][y] = 1
         self.board[adjacentBombs][x][y] = 1
 
-        done, reward = self.didWeWin()
-        if not done:
-            if adjacentBombs == 0:
-                self.autoUncover(x, y)
+        done, reward = self.areWeDone()
+        if not done and adjacentBombs == 0:
+            self.autoUncover(x, y)
 
         return self.board, reward, done, {}
 
