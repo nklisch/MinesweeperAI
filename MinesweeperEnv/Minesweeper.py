@@ -58,13 +58,13 @@ def decodeAction(action, boardShape):
 
 class MinesweeperEnv(gym.Env):
 
-    def __init__(self, shape, ratioOfBombs=0.20):
+    def __init__(self, shape=(8, 8), ratioOfBombs=0.20):
         self.size = shape[0] * shape[1]
         self.action_space = spaces.Discrete(self.size)
         self.shape = shape
         self.ratioOfBombs = ratioOfBombs
         self.observation_space = spaces.Box(low=0.0, high=1.0, shape=(CHANNELS, shape[0], shape[1]))
-        self.board, self.bombBoard, self.bombCountBoard, self.numOfBombs, self.seed, self.firstMove = None
+        self.board = self.bombBoard = self.bombCountBoard = self.numOfBombs = self.seed = self.firstMove = None
         self.reset()
 
     def autoUncover(self, x, y):
