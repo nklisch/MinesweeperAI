@@ -91,6 +91,7 @@ class MinesweeperEnv(gym.Env):
         return False, 0
 
     def step(self, action):
+        assert self.action_space.contains(action)
         x, y = decodeAction(action, self.board.shape)
         if self.firstMove:
             firstMoveNeverLose(x, y, self.bombBoard)
@@ -132,3 +133,6 @@ class MinesweeperEnv(gym.Env):
 
                 print('''|{}'''.format(cell), end='')
             print('|')
+
+    def startingState(self):
+        return np.zeros((CHANNELS, self.shape[0], self.shape[1]))

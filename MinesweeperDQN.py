@@ -2,14 +2,12 @@ import math
 
 import MinesweeperEnv.Minesweeper as ms
 import random
-import numpy as np
+from itertools import count
 from collections import namedtuple
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
-
-env = ms.MinesweeperEnv((8, 8), 0.2)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -79,9 +77,9 @@ class DQN(nn.Module):
 
 class TrainingModel:
 
-    def __init__(self, batchSize=200, gamma=0.99, epsilonStart=0.9, epsilonEnd=0.05, epsilonDecay=200, targetUpdate=10):
+    def __init__(self, batchSize=200, gamma=0.99, epsilonStart=0.9, epsilonEnd=0.05, epsilonDecay=200):
         self.batch_size, self.gamma, self.epsilonStart = batchSize, gamma, epsilonStart
-        self.epsilonEnd, self.epsilonDecay, self.targetUpdate = epsilonEnd, epsilonDecay, targetUpdate
+        self.epsilonEnd, self.epsilonDecay, self.targetUpdate = epsilonEnd, epsilonDecay
         self.policyNet = self.targetNet = None
         self.stepsDone = 0
         return self
@@ -112,8 +110,8 @@ class TrainingModel:
         else:
             return torch.tensor([[random.randrange(self.numberOfActions)]], device=device, dtype=torch.long)
 
-    def updateTargetNet(self, parameters):
-        self.targetNet.load_state_dict(parameters)
+    def updateTargetNet(self,):
+        self.targetNet.load_state_dict(self.policyNet.state_dict())
 
     def optimize(self, memory):
         if len(self.memory) < self.batch_size:
@@ -143,4 +141,35 @@ class TrainingModel:
         for param in self.policyNet.parameters():
             param.grad.data.clamp_(-1, 1)
         self.optimizer.step()
-    
+
+
+def trainAModel(boardShape, percentOfBombs, numberOfEpisodes, batchSize, gamma, epsilonStart, epsilonEnd, epsilonDecay,
+                targetUpdate, kernel_size, stride, convLayerChannels,
+                fullyConnectedLayers):
+    memory = ReplayMemory(10000)
+    env = ms.MinesweeperEnv(boardShape, percentOfBombs)
+    for i_episode in range(numberOfEpisodes):
+        env.reset()
+        state = env.startingState()
+        numberOfActions = env.action_space.n
+        model = TrainingModel(batchSize=batchSize, gamma=gamma, epsilonStart=epsilonStart, epsilonEnd=epsilonEnd,
+                              epsilonDecay=epsilonDecay)
+        model.createDQN(boardShape[0], boardShape[1], numberOfActions, kernel_size, stride, convLayerChannels,
+                        fullyConnectedLayers)
+        for t in count():
+            action = model.selectAction(state)
+            next_state, reward, done, _ = env.step(action)
+            reward = torch.tensor([reward], device=device)
+            if done:
+                next_state = None
+
+            memory.push(state, action, next_state, reward)
+            state = next_state
+
+            model.optimize(memory)
+            if done:
+                break
+
+        if i_episode % targetUpdate == 0:
+            model.targetUpdate()
+
