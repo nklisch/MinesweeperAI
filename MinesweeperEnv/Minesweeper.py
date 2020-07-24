@@ -43,7 +43,7 @@ def firstMoveNeverLose(x, y, bombBoard):
 
 
 def createBombCountBoard(bombBoard):
-    bombCountBoard = np.zeros(bombBoard.shape)
+    bombCountBoard = np.zeros(bombBoard.shape, dtype='int64')
     for i in range(0, bombBoard.shape[0]):
         for j in range(0, bombBoard.shape[1]):
             bombCountBoard[i][j] = countAdjacentBombs(i, j, bombBoard)
@@ -52,7 +52,7 @@ def createBombCountBoard(bombBoard):
 
 def decodeAction(action, boardShape):
     x = action % boardShape[0]
-    y = action / boardShape[0]
+    y = action // boardShape[0]
     return x, y
 
 
@@ -70,14 +70,15 @@ class MinesweeperEnv(gym.Env):
     def autoUncover(self, x, y):
         for xMod in range(-1, 2):
             for yMod in range(-1, 2):
-                adjacentBombs = self.bombCountBoard[currentX][currentY]
                 currentX, currentY = (x + xMod), (y + yMod)
                 if 0 <= currentX < self.bombBoard.shape[0] and 0 <= currentY < self.bombBoard.shape[1]:
+                    adjacentBombs = self.bombCountBoard[currentX][currentY]
                     if self.board[0][currentX][currentY] == 0:
                         if adjacentBombs == 0:
                             self.board[0][currentX][currentY] = 1
                             self.autoUncover(currentX, currentY)
                         elif not isBomb(self.bombBoard[currentX][currentY]):
+                            self.board[0][currentX][currentY] = 1
                             self.board[adjacentBombs][currentX][currentY] = 1
 
     def won(self):
@@ -92,7 +93,7 @@ class MinesweeperEnv(gym.Env):
 
     def step(self, action):
         assert self.action_space.contains(action)
-        x, y = decodeAction(action, self.board.shape)
+        x, y = decodeAction(action, self.shape)
         if self.firstMove:
             firstMoveNeverLose(x, y, self.bombBoard)
             self.bombCountBoard = createBombCountBoard(self.bombBoard)
@@ -102,7 +103,7 @@ class MinesweeperEnv(gym.Env):
         self.board[0][x][y] = 1
         self.board[adjacentBombs][x][y] = 1
 
-        done, reward = self.areWeDone()
+        done, reward = self.areWeDone(x, y)
         if not done and adjacentBombs == 0:
             self.autoUncover(x, y)
 
