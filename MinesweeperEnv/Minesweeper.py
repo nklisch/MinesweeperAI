@@ -1,6 +1,6 @@
 import gym
 from gym import spaces
-import numpy as np
+import torch
 import random
 
 # channels to represent adjacent bomb locations and one for all spaces that have been uncovered so far
@@ -23,14 +23,14 @@ def countAdjacentBombs(x, y, bombBoard):
     return bombs
 
 
-def createBoardWithBombs(shape, ratioOfBombs, seed=None):
+def createBoardWithBombs(shape, ratioOfBombs, device, seed=None):
     size = shape[0] * shape[1]
     numOfBombs = int(size * ratioOfBombs)
     random.seed(seed)
     bombIndex = random.sample(range(0, size), numOfBombs)
-    bombBoard = np.zeros(shape=size)
+    bombBoard = torch.zeros(size=shape, device=device).view(size, 1)
     bombBoard[bombIndex] = 1
-    return bombBoard.reshape(shape), numOfBombs
+    return bombBoard.view(shape), numOfBombs
 
 
 def firstMoveNeverLose(x, y, bombBoard):
@@ -42,8 +42,8 @@ def firstMoveNeverLose(x, y, bombBoard):
                     bombBoard[i][j] = 1
 
 
-def createBombCountBoard(bombBoard):
-    bombCountBoard = np.zeros(bombBoard.shape, dtype='int64')
+def createBombCountBoard(bombBoard, device):
+    bombCountBoard = torch.zeros(bombBoard.shape, dtype=torch.long, device=device)
     for i in range(0, bombBoard.shape[0]):
         for j in range(0, bombBoard.shape[1]):
             bombCountBoard[i][j] = countAdjacentBombs(i, j, bombBoard)
@@ -58,11 +58,12 @@ def decodeAction(action, boardShape):
 
 class MinesweeperEnv(gym.Env):
 
-    def __init__(self, shape=(8, 8), ratioOfBombs=0.20):
+    def __init__(self, shape=(8, 8), ratioOfBombs=0.20, device='cpu'):
         self.size = shape[0] * shape[1]
         self.action_space = spaces.Discrete(self.size)
         self.shape = shape
         self.ratioOfBombs = ratioOfBombs
+        self.device = device
         self.observation_space = spaces.Box(low=0.0, high=1.0, shape=(CHANNELS, shape[0], shape[1]))
         self.board = self.bombBoard = self.bombCountBoard = self.numOfBombs = self.seed = self.firstMove = None
         self.reset()
@@ -96,7 +97,7 @@ class MinesweeperEnv(gym.Env):
         x, y = decodeAction(action, self.shape)
         if self.firstMove:
             firstMoveNeverLose(x, y, self.bombBoard)
-            self.bombCountBoard = createBombCountBoard(self.bombBoard)
+            self.bombCountBoard = createBombCountBoard(self.bombBoard, self.device)
             self.firstMove = False
 
         adjacentBombs = self.bombCountBoard[x][y]
@@ -111,8 +112,8 @@ class MinesweeperEnv(gym.Env):
 
     def reset(self):
         self.firstMove = True
-        self.board = np.zeros((CHANNELS, self.shape[0], self.shape[1]))
-        self.bombBoard, self.numOfBombs = createBoardWithBombs(self.shape, self.ratioOfBombs, self.seed)
+        self.board = torch.zeros((CHANNELS, self.shape[0], self.shape[1]), device=self.device)
+        self.bombBoard, self.numOfBombs = createBoardWithBombs(self.shape, self.ratioOfBombs, self.device, self.seed)
 
     def seed(self, seed=None):
         self.seed = seed
@@ -136,4 +137,4 @@ class MinesweeperEnv(gym.Env):
             print('|')
 
     def startingState(self):
-        return np.zeros((CHANNELS, self.shape[0], self.shape[1]))
+        return torch.zeros((CHANNELS, self.shape[0], self.shape[1]), device=self.device)
