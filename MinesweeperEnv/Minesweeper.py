@@ -87,10 +87,10 @@ class MinesweeperEnv(gym.Env):
 
     def areWeDone(self, x, y):
         if isBomb(self.bombBoard[x][y]):
-            return True, -1
+            return True, -10
         elif self.won():
-            return True, 1
-        return False, 0
+            return True, self.winReward()
+        return False, 1
 
     def step(self, action):
         assert self.action_space.contains(action)
@@ -101,12 +101,16 @@ class MinesweeperEnv(gym.Env):
             self.firstMove = False
 
         adjacentBombs = self.bombCountBoard[x][y]
-        self.board[0][x][y] = 1
-        self.board[adjacentBombs][x][y] = 1
+        done, reward = False, 0
+        if self.board[0][x][y] == 1:
+            reward = 1
+        else:
+            self.board[0][x][y] = 1
+            self.board[adjacentBombs][x][y] = 1
 
-        done, reward = self.areWeDone(x, y)
-        if not done and adjacentBombs == 0:
-            self.autoUncover(x, y)
+            done, reward = self.areWeDone(x, y)
+            if not done and adjacentBombs == 0:
+                self.autoUncover(x, y)
 
         return self.board, reward, done, {}
 
@@ -121,7 +125,11 @@ class MinesweeperEnv(gym.Env):
     def close(self):
         return None
 
+    def winReward(self):
+        return 100
+
     def render(self, mode='human'):
+        print()
         for x, row in enumerate(self.board[0]):
             for y, cell in enumerate(row):
                 if cell == 0:
@@ -135,6 +143,7 @@ class MinesweeperEnv(gym.Env):
 
                 print('''|{}'''.format(cell), end='')
             print('|')
+        print()
 
     def startingState(self):
         return torch.zeros((CHANNELS, self.shape[0], self.shape[1]), device=self.device)

@@ -8,8 +8,8 @@ import torch as torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
-
-
+import pandas as pd
+import matplotlib
 
 Transition = namedtuple('Transition',
                         ('state', 'action', 'next_state', 'reward'))
@@ -38,30 +38,38 @@ class ReplayMemory(object):
 
 class DQN(nn.Module):
 
-    def __init__(self, height, width, finalOutputs, kernel_size, stride, padding, convLayerChannels, fullyConnectedLayers, device,
+    def __init__(self, height, width, finalOutputs, kernel_size, stride, padding, convLayerChannels,
+                 fullyConnectedLayers, device,
                  parameters=None):
         super(DQN, self).__init__()
         self.convLayers = nn.ModuleList()
         self.batchNormal = nn.ModuleList()
-        self.fullyConnectedLayers = []
+        self.fullyConnectedLayers = nn.ModuleList()
         self.device = device
+
         def conv2d_size_out(size, kernel_size=kernel_size, stride=stride, padding=padding):
-            return (((size - 2 * padding - kernel_size - 1) - 1) // stride) + 1
+            return (((size + 2 * padding - kernel_size)) // stride) + 1
+
         convw = width
         convh = height
         for index, channels in enumerate(convLayerChannels[:-1]):
             self.convLayers.append(
-                nn.Conv2d(channels, convLayerChannels[index + 1], kernel_size=kernel_size, stride=stride, padding=padding))
+                nn.Conv2d(channels, convLayerChannels[index + 1], kernel_size=kernel_size, stride=stride,
+                          padding=padding))
             self.batchNormal.append(nn.BatchNorm2d(convLayerChannels[index + 1]))
             convw = conv2d_size_out(convw)
             convh = conv2d_size_out(convh)
 
-        self.convLayers.append(nn.Conv2d(convLayerChannels[-1], convLayerChannels[-1], kernel_size=kernel_size,stride=stride, padding=padding))
+        self.convLayers.append(
+            nn.Conv2d(convLayerChannels[-1], convLayerChannels[-1], kernel_size=kernel_size, stride=stride,
+                      padding=padding))
         self.batchNormal.append(nn.BatchNorm2d(convLayerChannels[-1]))
+        convw = conv2d_size_out(convw)
+        convh = conv2d_size_out(convh)
         linearInputSize = convw * convh * convLayerChannels[-1]
 
         for output in fullyConnectedLayers:
-            self.append(nn.Linear(linearInputSize, output))
+            self.fullyConnectedLayers.append(nn.Linear(linearInputSize, output))
             linearInputSize = output
 
         self.outputLayer = nn.Linear(linearInputSize, finalOutputs)
@@ -75,9 +83,9 @@ class DQN(nn.Module):
             x = F.relu(batchNorm(convLayer(x)))
 
         for layer in self.fullyConnectedLayers:
-            x = F.relu(layer(x))
+            x = F.relu(layer(x.view(x.shape[0], -1)))
 
-        return self.outputLayer(x.view(x.size(0), -1))
+        return self.outputLayer(x.view(x.shape[0], -1))
 
 
 class TrainingModel:
@@ -89,7 +97,8 @@ class TrainingModel:
         self.policyNet = self.targetNet = None
         self.stepsDone = 0
 
-    def createDQN(self, height, width, numberOfActions, kernel_size=3, stride=1, padding=1, convLayerChannels=[9, 18, 36],
+    def createDQN(self, height, width, numberOfActions, kernel_size=3, stride=1, padding=1,
+                  convLayerChannels=[9, 18, 36],
                   fullyConnectedLayers=[]):
         self.policyNet = DQN(height, width, numberOfActions, kernel_size, stride, padding, convLayerChannels,
                              fullyConnectedLayers, self.device)
@@ -117,7 +126,7 @@ class TrainingModel:
         else:
             return random.randrange(self.numberOfActions)
 
-    def updateTargetNet(self,):
+    def updateTargetNet(self, ):
         self.targetNet.load_state_dict(self.policyNet.state_dict())
 
     def optimize(self, memory):
@@ -132,7 +141,7 @@ class TrainingModel:
 
         stateBatch = torch.cat(batch.state, 0)
         actionBatch = torch.cat(batch.action)
-        rewardBatch = torch.cat(batch.reward).to(torch.float32)
+        rewardBatch = torch.cat(batch.reward)
         temp = self.policyNet(stateBatch)
         stateActionValues = temp.gather(1, actionBatch.view((-1, 1)))
 
@@ -150,12 +159,17 @@ class TrainingModel:
         self.optimizer.step()
 
 
-def trainAModel(boardShape, percentOfBombs, numberOfEpisodes, batchSize, gamma, epsilonStart, epsilonEnd, epsilonDecay, kernelSize, stride, padding, targetUpdate, convLayerChannels,
-                fullyConnectedLayers, device):
-    memory = ReplayMemory(10000)
+def trainAModel(boardShape, percentOfBombs, numberOfEpisodes, batchSize, gamma, epsilonStart, epsilonEnd, epsilonDecay,
+                kernelSize, stride, padding, targetUpdate, convLayerChannels,
+                fullyConnectedLayers, device, fileOutputPath):
+    memory = ReplayMemory(50000)
     env = ms.MinesweeperEnv(boardShape, percentOfBombs, device)
     wins = 0
-    print("wins: ", end='')
+    steps = 0
+    totalReward = 0
+    model = None
+    dfRewards = pd.DataFrame(columns=['Episode', 'Average Total Reward', 'Average Win', 'Average Steps'])
+    print('Episode: ', end='')
     for i_episode in range(numberOfEpisodes):
         env.reset()
         state = env.startingState().view((1, 9, boardShape[0], boardShape[1]))
@@ -164,15 +178,18 @@ def trainAModel(boardShape, percentOfBombs, numberOfEpisodes, batchSize, gamma, 
                               epsilonDecay=epsilonDecay, device=device)
         model.createDQN(boardShape[0], boardShape[1], numberOfActions, kernelSize, stride, padding, convLayerChannels,
                         fullyConnectedLayers)
+
         for t in count():
             action = model.selectAction(state)
             next_state, reward, done, _ = env.step(action)
+            totalReward += reward
+            steps += 1
             next_state = next_state.view((1, next_state.shape[0], next_state.shape[1], next_state.shape[2]))
-            if reward == 1:
-                wins += 1
+            if reward == env.winReward():
                 env.render()
+                wins += 1
 
-            reward = torch.tensor([reward], device=device)
+            reward = torch.tensor([reward], device=device, dtype=torch.float32)
             action = torch.tensor([action], device=device)
             if done:
                 next_state = None
@@ -184,7 +201,18 @@ def trainAModel(boardShape, percentOfBombs, numberOfEpisodes, batchSize, gamma, 
             if done:
                 break
 
-        if i_episode % targetUpdate == 0:
+        if i_episode % targetUpdate == 0 and i_episode != 0:
+            dfRewards = dfRewards.append(
+                {'Episode': i_episode, 'Average Total Reward': totalReward/targetUpdate, 'Average Win': wins/targetUpdate, 'Average Steps': steps/targetUpdate},
+                ignore_index=True)
             model.updateTargetNet()
-            print(wins, end=' ')
+            print(i_episode, end=' ')
+            wins = 0
+            steps = 0
+            totalReward = 0
+        if i_episode % (targetUpdate * 10) == 0:
+            f = open(fileOutputPath, 'a')
+            dfRewards.to_csv(fileOutputPath)
+            f.close()
 
+    return model, dfRewards
