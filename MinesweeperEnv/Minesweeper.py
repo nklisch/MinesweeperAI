@@ -1,6 +1,6 @@
 import gym
 from gym import spaces
-import numpy as np
+import torch
 import random
 
 # channels to represent adjacent bomb locations and one for all spaces that have been uncovered so far
@@ -17,19 +17,20 @@ def countAdjacentBombs(x, y, bombBoard):
         for yMod in range(-1, 2):
             currentX, currentY = (x + xMod), (y + yMod)
             if 0 <= currentX < bombBoard.shape[0] and 0 <= currentY < bombBoard.shape[1]:
-                if isBomb(bombBoard[currentX][currentY]):
-                    bombs += 1
+                if not (currentX == x and currentY == y):
+                    if isBomb(bombBoard[currentX][currentY]):
+                        bombs += 1
     return bombs
 
 
-def createBoardWithBombs(shape, ratioOfBombs, seed=None):
+def createBoardWithBombs(shape, ratioOfBombs, device, seed=None):
     size = shape[0] * shape[1]
     numOfBombs = int(size * ratioOfBombs)
     random.seed(seed)
     bombIndex = random.sample(range(0, size), numOfBombs)
-    bombBoard = np.zeros(shape=size)
+    bombBoard = torch.zeros(size=shape, device=device).view(size, 1)
     bombBoard[bombIndex] = 1
-    return bombBoard.reshape(shape), numOfBombs
+    return bombBoard.view(shape), numOfBombs
 
 
 def firstMoveNeverLose(x, y, bombBoard):
@@ -41,8 +42,8 @@ def firstMoveNeverLose(x, y, bombBoard):
                     bombBoard[i][j] = 1
 
 
-def createBombCountBoard(bombBoard):
-    bombCountBoard = np.zeros(bombBoard.shape)
+def createBombCountBoard(bombBoard, device):
+    bombCountBoard = torch.zeros(bombBoard.shape, dtype=torch.long, device=device)
     for i in range(0, bombBoard.shape[0]):
         for j in range(0, bombBoard.shape[1]):
             bombCountBoard[i][j] = countAdjacentBombs(i, j, bombBoard)
@@ -51,62 +52,72 @@ def createBombCountBoard(bombBoard):
 
 def decodeAction(action, boardShape):
     x = action % boardShape[0]
-    y = action / boardShape[0]
+    y = action // boardShape[0]
     return x, y
 
 
 class MinesweeperEnv(gym.Env):
 
-    def __init__(self, shape, ratioOfBombs=0.20):
-        self.action_space = spaces.Discrete(shape[0] * shape[1])
-        self.ratioOfBombs = ratioOfBombs
-        self.observation_space = spaces.Box(low=0.0, high=1.0, shape=(CHANNELS, shape[0], shape[1]))
+    def __init__(self, shape=(8, 8), ratioOfBombs=0.20, device='cpu'):
+        self.size = shape[0] * shape[1]
+        self.action_space = spaces.Discrete(self.size)
         self.shape = shape
-        self.board, self.bombBoard, self.bombCountBoard, self.numOfBombs, self.seed, self.firstMove = None
+        self.ratioOfBombs = ratioOfBombs
+        self.device = device
+        self.observation_space = spaces.Box(low=0.0, high=1.0, shape=(CHANNELS, shape[0], shape[1]))
+        self.board = self.bombBoard = self.bombCountBoard = self.numOfBombs = self.seed = self.firstMove = None
         self.reset()
 
     def autoUncover(self, x, y):
         for xMod in range(-1, 2):
             for yMod in range(-1, 2):
-                adjacentBombs = self.bombCountBoard[currentX][currentY]
                 currentX, currentY = (x + xMod), (y + yMod)
                 if 0 <= currentX < self.bombBoard.shape[0] and 0 <= currentY < self.bombBoard.shape[1]:
+                    adjacentBombs = self.bombCountBoard[currentX][currentY]
                     if self.board[0][currentX][currentY] == 0:
                         if adjacentBombs == 0:
                             self.board[0][currentX][currentY] = 1
                             self.autoUncover(currentX, currentY)
                         elif not isBomb(self.bombBoard[currentX][currentY]):
+                            self.board[0][currentX][currentY] = 1
                             self.board[adjacentBombs][currentX][currentY] = 1
 
-    def didWeWin(self, x, y):
+    def won(self):
+        return self.size - self.board[0].sum() == self.numOfBombs
+
+    def areWeDone(self, x, y):
         if isBomb(self.bombBoard[x][y]):
-            return True, -1
-        elif self.board[self.board == 1].sum() <= self.numOfBombs:
-            return True, 1
-        return False, 0
+            return True, -10
+        elif self.won():
+            return True, self.winReward()
+        return False, 1
 
     def step(self, action):
-        x, y = decodeAction(action, self.board.shape)
+        assert self.action_space.contains(action)
+        x, y = decodeAction(action, self.shape)
         if self.firstMove:
             firstMoveNeverLose(x, y, self.bombBoard)
-            self.bombCountBoard = createBombCountBoard(self.bombBoard)
+            self.bombCountBoard = createBombCountBoard(self.bombBoard, self.device)
             self.firstMove = False
 
         adjacentBombs = self.bombCountBoard[x][y]
-        self.board[0][x][y] = 1
-        self.board[adjacentBombs][x][y] = 1
+        done, reward = False, 0
+        if self.board[0][x][y] == 1:
+            reward = 1
+        else:
+            self.board[0][x][y] = 1
+            self.board[adjacentBombs][x][y] = 1
 
-        done, reward = self.didWeWin()
-        if not done:
-            if adjacentBombs == 0:
+            done, reward = self.areWeDone(x, y)
+            if not done and adjacentBombs == 0:
                 self.autoUncover(x, y)
 
         return self.board, reward, done, {}
 
     def reset(self):
         self.firstMove = True
-        self.board = np.zeros((CHANNELS, self.shape[0], self.shape[1]))
-        self.bombBoard, self.numOfBombs = createBoardWithBombs(self.shape, self.ratioOfBombs, self.seed)
+        self.board = torch.zeros((CHANNELS, self.shape[0], self.shape[1]), device=self.device)
+        self.bombBoard, self.numOfBombs = createBoardWithBombs(self.shape, self.ratioOfBombs, self.device, self.seed)
 
     def seed(self, seed=None):
         self.seed = seed
@@ -114,7 +125,11 @@ class MinesweeperEnv(gym.Env):
     def close(self):
         return None
 
+    def winReward(self):
+        return 100
+
     def render(self, mode='human'):
+        print()
         for x, row in enumerate(self.board[0]):
             for y, cell in enumerate(row):
                 if cell == 0:
@@ -128,3 +143,7 @@ class MinesweeperEnv(gym.Env):
 
                 print('''|{}'''.format(cell), end='')
             print('|')
+        print()
+
+    def startingState(self):
+        return torch.zeros((CHANNELS, self.shape[0], self.shape[1]), device=self.device)
