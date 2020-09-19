@@ -1,2 +1,2 @@
 # MinesweeperAI
-Implements an openAI gym enviroment for minesweeper and uses a DQN algorithum to solve it
+Implements an openAI gym environment for minesweeper and uses an algorithm to solve it 
